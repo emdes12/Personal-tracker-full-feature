@@ -1,21 +1,24 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import * as analyticsApi from "../api/analytics";
-import type { DashboardStats, LifetimeStats } from "../types";
+import type { AnalyticsTrends, DashboardStats, LifetimeStats } from "../types";
 import ProgressBar from "../components/ProgressBar.vue";
 import SkeletonCards from "../components/SkeletonCards.vue";
 import Icon from "../components/Icon.vue";
+import TrendChart from "../components/TrendChart.vue";
 
 const stats = ref<DashboardStats | null>(null);
 const lifetime = ref<LifetimeStats | null>(null);
+const trends = ref<AnalyticsTrends | null>(null);
 const loading = ref(true);
 
 async function load() {
   loading.value = true;
   try {
-    const [d, l] = await Promise.all([analyticsApi.getDashboardStats(), analyticsApi.getLifetimeStats()]);
+    const [d, l, t] = await Promise.all([analyticsApi.getDashboardStats(), analyticsApi.getLifetimeStats(), analyticsApi.getTrends()]);
     stats.value = d;
     lifetime.value = l;
+    trends.value = t;
   } finally {
     loading.value = false;
   }
@@ -81,6 +84,11 @@ function formatHours(minutes: number): string {
           <p class="text-xl font-semibold text-stone-900">{{ stats.longestStreak }}</p>
           <p class="text-xs text-stone-400">longest streak</p>
         </div>
+      </section>
+
+      <section v-if="trends" class="grid gap-4 sm:grid-cols-2">
+        <TrendChart title="Weekly completion (8 weeks)" :buckets="trends.weekly" />
+        <TrendChart title="Monthly completion (6 months)" :buckets="trends.monthly" />
       </section>
 
       <section v-if="stats.goals.length">

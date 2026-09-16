@@ -6,6 +6,7 @@ import * as targetsApi from "../api/targets";
 import type { AiChatMessage, AiProposedTask, AiProposedTarget } from "../types";
 import Icon from "../components/Icon.vue";
 import EmptyState from "../components/EmptyState.vue";
+import MarkdownContent from "../components/MarkdownContent.vue";
 import { useToast } from "../composables/useToast";
 
 const toast = useToast();
@@ -129,7 +130,8 @@ const isEmpty = computed(() => messages.value.length === 0);
               class="rounded-2xl px-4 py-2.5 text-sm"
               :class="m.role === 'user' ? 'bg-stone-900 text-white' : 'border border-stone-200 bg-white text-stone-800'"
             >
-              {{ m.content }}
+              <MarkdownContent v-if="m.role === 'assistant'" :content="m.content" />
+              <template v-else>{{ m.content }}</template>
             </div>
 
             <div v-if="m.proposedTasks?.length" class="space-y-2">

@@ -9,6 +9,11 @@ export interface ChatMessage {
   content: string;
 }
 
+interface ToolCallFunction {
+  proposedTasks: ProposedTask[];
+  proposedTargets: ChatResult["proposedTargets"];
+}
+
 export interface ProposedTask {
   title: string;
   scheduledDate: string;
@@ -134,7 +139,12 @@ export async function chat(userId: string, timezone: string, message: string, hi
   });
 
   const choice = completion.choices[0];
-  const { proposedTasks, proposedTargets } = parseToolCalls(choice.message.tool_calls ?? []);
+  const toolCalls = choice.message.tool_calls ?? [];
+
+
+  const toolsCall = callTools(toolCalls);
+  const proposedTasks: ProposedTask[] = toolsCall.proposedTasks;
+  let proposedTargets: ChatResult["proposedTargets"] = toolsCall.proposedTargets;
 
   const reply =
     choice.message.content?.trim() ||
@@ -143,16 +153,12 @@ export async function chat(userId: string, timezone: string, message: string, hi
   return { reply, proposedTasks, proposedTargets };
 }
 
-interface ParsedToolCalls {
-  proposedTasks: ProposedTask[];
-  proposedTargets: ChatResult["proposedTargets"];
-}
-
-function parseToolCalls(toolCalls: OpenAI.Chat.Completions.ChatCompletionMessageToolCall[]): ParsedToolCalls {
+function callTools(tools:OpenAI.Chat.Completions.ChatCompletionToolCall[]): { proposedTasks: ProposedTask[]; proposedTargets: ChatResult["proposedTargets"] } {
+  
   const proposedTasks: ProposedTask[] = [];
   let proposedTargets: ChatResult["proposedTargets"] = null;
 
-  for (const call of toolCalls) {
+  for (const call of tools) {
     if (call.type !== "function") continue;
     try {
       const args = JSON.parse(call.function.arguments);

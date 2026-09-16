@@ -1,6 +1,6 @@
 import { DateTime } from "luxon";
 import { queryRaw } from "../../db/index";
-import { getHistoryRange } from "../history/service";
+import { getHistoryRange, type DayHistorySummary } from "../history/service";
 import { listGoals } from "../goals/service";
 import { listSleepRecordsInRange } from "../sleep/service";
 import { computeCompletionStreak, computeLongestStreak } from "../streaks/service";
@@ -48,6 +48,63 @@ export async function getDashboardStats(userId: string, timezone: string) {
     currentStreak,
     longestStreak,
   };
+}
+
+export interface TrendBucket {
+  label: string;
+  start: string;
+  completed: number;
+  total: number;
+  percent: number;
+}
+
+function sumBucket(days: DayHistorySummary[], startStr: string, endStr: string): { completed: number; total: number } {
+  const inBucket = days.filter((d) => d.date >= startStr && d.date <= endStr);
+  return {
+    completed: inBucket.reduce((sum, d) => sum + d.tasksCompleted, 0),
+    total: inBucket.reduce((sum, d) => sum + d.tasksTotal, 0),
+  };
+}
+
+function toBucket(label: string, start: string, sums: { completed: number; total: number }): TrendBucket {
+  return { label, start, ...sums, percent: sums.total === 0 ? 0 : Math.round((sums.completed / sums.total) * 100) };
+}
+
+/**
+ * Completion-% trend over multiple periods — "deeper" than the dashboard's
+ * single this-week/this-month numbers. Buckets are computed from one
+ * getHistoryRange call spanning the full window rather than one query per
+ * bucket; empty weeks/months correctly show 0%, not a gap.
+ */
+export async function getTrends(userId: string, timezone: string): Promise<{ weekly: TrendBucket[]; monthly: TrendBucket[] }> {
+  const today = todayInTimezone(timezone);
+  const todayDt = DateTime.fromISO(today);
+  const WEEKS_BACK = 8;
+  const MONTHS_BACK = 6;
+
+  const weeklyRangeStart = todayDt.startOf("week").minus({ weeks: WEEKS_BACK - 1 }).toISODate()!;
+  const monthlyRangeStart = todayDt.startOf("month").minus({ months: MONTHS_BACK - 1 }).toISODate()!;
+  const rangeStart = weeklyRangeStart < monthlyRangeStart ? weeklyRangeStart : monthlyRangeStart;
+
+  const days = await getHistoryRange(userId, rangeStart, today);
+
+  const weekly: TrendBucket[] = [];
+  for (let i = WEEKS_BACK - 1; i >= 0; i--) {
+    const weekStart = todayDt.startOf("week").minus({ weeks: i });
+    const weekEnd = weekStart.plus({ days: 6 });
+    const startStr = weekStart.toISODate()!;
+    weekly.push(toBucket(weekStart.toFormat("MMM d"), startStr, sumBucket(days, startStr, weekEnd.toISODate()!)));
+  }
+
+  const monthly: TrendBucket[] = [];
+  for (let i = MONTHS_BACK - 1; i >= 0; i--) {
+    const monthStart = todayDt.startOf("month").minus({ months: i });
+    const monthEnd = monthStart.endOf("month");
+    const startStr = monthStart.toISODate()!;
+    monthly.push(toBucket(monthStart.toFormat("MMM"), startStr, sumBucket(days, startStr, monthEnd.toISODate()!)));
+  }
+
+  return { weekly, monthly };
 }
 
 /** All-time totals shown on the analytics page. */

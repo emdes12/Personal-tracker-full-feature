@@ -17,8 +17,20 @@ const noteOpen = ref(false);
 const noteText = ref("");
 const savingNote = ref(false);
 const focusBusy = ref(false);
+const focusMenuOpen = ref(false);
 const nowTick = ref(Date.now());
 let tickTimer: ReturnType<typeof setInterval> | undefined;
+
+// Pomodoro-style target: purely a client-side countdown overlay on top of
+// the server-tracked open-ended focus session (see focusStartedAt) — no
+// schema change needed, since the server only ever needs the real elapsed
+// minutes on stop, not the planned duration. Resets on reload, which is
+// fine: the session just falls back to the open-ended count-up display.
+const targetMinutes = ref<number | null>(null);
+const POMODORO_PRESETS = [
+  { label: "25 min", minutes: 25 },
+  { label: "50 min", minutes: 50 },
+];
 
 const priorityColor: Record<string, string> = {
   urgent: "bg-red-50 text-red-600 ring-1 ring-inset ring-red-200",
@@ -29,24 +41,40 @@ const priorityColor: Record<string, string> = {
 
 const isFocusing = computed(() => Boolean(props.occurrence.focusStartedAt));
 
-const liveElapsedMinutes = computed(() => {
-  if (!props.occurrence.focusStartedAt) return props.occurrence.focusedMinutes;
+const liveElapsedSeconds = computed(() => {
+  if (!props.occurrence.focusStartedAt) return 0;
   const runningMs = nowTick.value - new Date(props.occurrence.focusStartedAt).getTime();
-  return props.occurrence.focusedMinutes + Math.floor(Math.max(0, runningMs) / 60_000);
+  return Math.max(0, Math.floor(runningMs / 1000));
 });
 
-const liveElapsedDisplay = computed(() => {
-  if (!props.occurrence.focusStartedAt) return "";
-  const runningMs = nowTick.value - new Date(props.occurrence.focusStartedAt).getTime();
-  const totalSeconds = Math.max(0, Math.floor(runningMs / 1000));
+const liveElapsedMinutes = computed(() => {
+  if (!props.occurrence.focusStartedAt) return props.occurrence.focusedMinutes;
+  return props.occurrence.focusedMinutes + Math.floor(liveElapsedSeconds.value / 60);
+});
+
+function formatClock(totalSeconds: number): string {
   const m = Math.floor(totalSeconds / 60);
   const s = totalSeconds % 60;
   return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+const liveElapsedDisplay = computed(() => {
+  if (!props.occurrence.focusStartedAt) return "";
+  if (targetMinutes.value !== null) {
+    const remaining = targetMinutes.value * 60 - liveElapsedSeconds.value;
+    return formatClock(Math.max(0, remaining));
+  }
+  return formatClock(liveElapsedSeconds.value);
 });
 
 function startTicking() {
   if (tickTimer) return;
-  tickTimer = setInterval(() => (nowTick.value = Date.now()), 1000);
+  tickTimer = setInterval(() => {
+    nowTick.value = Date.now();
+    if (targetMinutes.value !== null && liveElapsedSeconds.value >= targetMinutes.value * 60) {
+      completePomodoro();
+    }
+  }, 1000);
 }
 function stopTicking() {
   if (tickTimer) clearInterval(tickTimer);
@@ -57,7 +85,10 @@ watch(
   () => props.occurrence.focusStartedAt,
   (val) => {
     if (val) startTicking();
-    else stopTicking();
+    else {
+      stopTicking();
+      targetMinutes.value = null;
+    }
   },
   { immediate: true },
 );
@@ -79,18 +110,54 @@ async function toggleComplete() {
   }
 }
 
-async function toggleFocus() {
+async function startFocus(minutes: number | null) {
+  focusMenuOpen.value = false;
   if (focusBusy.value) return;
   focusBusy.value = true;
   try {
-    if (isFocusing.value) {
-      await tasksApi.stopFocus(props.occurrence.id);
-    } else {
-      await tasksApi.startFocus(props.occurrence.id);
-    }
+    targetMinutes.value = minutes;
+    await tasksApi.startFocus(props.occurrence.id);
     emit("changed");
   } finally {
     focusBusy.value = false;
+  }
+}
+
+async function stopFocus() {
+  if (focusBusy.value) return;
+  focusBusy.value = true;
+  try {
+    await tasksApi.stopFocus(props.occurrence.id);
+    targetMinutes.value = null;
+    emit("changed");
+  } finally {
+    focusBusy.value = false;
+  }
+}
+
+let completingPomodoro = false;
+async function completePomodoro() {
+  if (completingPomodoro) return;
+  completingPomodoro = true;
+  const completedMinutes = targetMinutes.value;
+  try {
+    await tasksApi.stopFocus(props.occurrence.id);
+    targetMinutes.value = null;
+    toast.success(`Pomodoro complete — nice ${completedMinutes} min focus session`);
+    if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+      new Notification("Pomodoro complete", { body: props.occurrence.title });
+    }
+    emit("changed");
+  } finally {
+    completingPomodoro = false;
+  }
+}
+
+function onFocusButtonClick() {
+  if (isFocusing.value) {
+    stopFocus();
+  } else {
+    focusMenuOpen.value = !focusMenuOpen.value;
   }
 }
 
@@ -181,16 +248,30 @@ async function saveNote() {
         {{ occurrence.priority }}
       </span>
 
-      <button
-        v-if="occurrence.status !== 'completed'"
-        class="flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium transition-colors"
-        :class="isFocusing ? 'bg-emerald-600 text-white' : 'border border-stone-300 text-stone-500 hover:border-stone-400 hover:text-stone-700'"
-        :disabled="focusBusy"
-        @click="toggleFocus"
-      >
-        <Icon name="clock" :size="12" />
-        {{ isFocusing ? liveElapsedDisplay : "Focus" }}
-      </button>
+      <div v-if="occurrence.status !== 'completed'" class="relative shrink-0">
+        <button
+          class="flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium transition-colors"
+          :class="isFocusing ? 'bg-emerald-600 text-white' : 'border border-stone-300 text-stone-500 hover:border-stone-400 hover:text-stone-700'"
+          :disabled="focusBusy"
+          @click="onFocusButtonClick"
+        >
+          <Icon name="clock" :size="12" />
+          {{ isFocusing ? liveElapsedDisplay : "Focus" }}
+        </button>
+        <div v-if="focusMenuOpen" class="absolute right-0 z-20 mt-1 w-36 overflow-hidden rounded-lg border border-stone-200 bg-white py-1 shadow-lg">
+          <button
+            v-for="preset in POMODORO_PRESETS"
+            :key="preset.minutes"
+            class="flex w-full items-center justify-between px-3 py-1.5 text-left text-sm text-stone-600 hover:bg-stone-50"
+            @click="startFocus(preset.minutes)"
+          >
+            {{ preset.label }}
+          </button>
+          <button class="flex w-full items-center justify-between px-3 py-1.5 text-left text-sm text-stone-600 hover:bg-stone-50" @click="startFocus(null)">
+            No limit
+          </button>
+        </div>
+      </div>
 
       <div class="relative shrink-0">
         <button class="rounded-full p-1.5 text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-600" @click="menuOpen = !menuOpen">

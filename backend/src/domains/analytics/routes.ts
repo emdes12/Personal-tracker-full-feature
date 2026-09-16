@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { asyncHandler } from "../../lib/asyncHandler";
 import { requireAuth } from "../../middleware/requireAuth";
-import { getDashboardStats, getLifetimeStats } from "./service";
+import { getDashboardStats, getLifetimeStats, getTrends } from "./service";
 
 export const analyticsRouter = Router();
 analyticsRouter.use(requireAuth);
@@ -17,5 +17,12 @@ analyticsRouter.get(
   "/lifetime",
   asyncHandler(async (req, res) => {
     res.json(await getLifetimeStats(req.user!.id));
+  }),
+);
+
+analyticsRouter.get(
+  "/trends",
+  asyncHandler(async (req, res) => {
+    res.json(await getTrends(req.user!.id, req.user!.timezone));
   }),
 );

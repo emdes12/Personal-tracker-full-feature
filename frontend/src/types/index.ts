@@ -71,6 +71,19 @@ export interface LifetimeStats {
   activeDays: number;
 }
 
+export interface TrendBucket {
+  label: string;
+  start: string;
+  completed: number;
+  total: number;
+  percent: number;
+}
+
+export interface AnalyticsTrends {
+  weekly: TrendBucket[];
+  monthly: TrendBucket[];
+}
+
 export interface Target {
   id: string;
   goalId: string;

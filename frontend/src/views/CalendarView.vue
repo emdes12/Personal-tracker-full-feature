@@ -6,11 +6,19 @@ import { addDays, todayDateString } from "../lib/date";
 import TaskRow from "../components/TaskRow.vue";
 import SkeletonCards from "../components/SkeletonCards.vue";
 import Icon from "../components/Icon.vue";
+import { useToast } from "../composables/useToast";
+import { ApiError } from "../api/client";
+
+const toast = useToast();
 
 const today = todayDateString();
 const anchor = ref(today);
 const occurrences = ref<TaskOccurrence[]>([]);
 const loading = ref(true);
+const dragOverDay = ref<string | null>(null);
+const draggingId = ref<string | null>(null);
+
+const OPEN_STATUSES = new Set(["todo", "in_progress"]);
 
 function startOfWeek(dateStr: string): string {
   const [y, m, d] = dateStr.split("-").map(Number);
@@ -29,13 +37,17 @@ const weekLabel = computed(() => {
   return `${dayLabel(start, false)} – ${dayLabel(end, false)}`;
 });
 
-async function load() {
-  loading.value = true;
+// showSkeleton is false for reloads triggered by a task action (complete,
+// focus, drag-reschedule) so TaskRow instances stay mounted and keep their
+// local state (open menus, in-flight Pomodoro countdowns) — only a real
+// week change should flash the skeleton back in.
+async function load(showSkeleton = true) {
+  if (showSkeleton) loading.value = true;
   try {
     const res = await tasksApi.listOccurrencesInRange(weekStart.value, addDays(weekStart.value, 6));
     occurrences.value = res.occurrences;
   } finally {
-    loading.value = false;
+    if (showSkeleton) loading.value = false;
   }
 }
 
@@ -62,6 +74,50 @@ function thisWeek() {
   anchor.value = today;
   load();
 }
+
+function isDraggable(o: TaskOccurrence): boolean {
+  return OPEN_STATUSES.has(o.status);
+}
+
+function handleDragStart(e: DragEvent, o: TaskOccurrence) {
+  if (!isDraggable(o)) {
+    e.preventDefault();
+    return;
+  }
+  draggingId.value = o.id;
+  e.dataTransfer?.setData("text/plain", o.id);
+  if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+}
+
+function handleDragEnd() {
+  draggingId.value = null;
+  dragOverDay.value = null;
+}
+
+function handleDragOver(day: string) {
+  dragOverDay.value = day;
+}
+
+function handleDragLeave(day: string) {
+  if (dragOverDay.value === day) dragOverDay.value = null;
+}
+
+async function handleDrop(day: string) {
+  const id = draggingId.value;
+  dragOverDay.value = null;
+  draggingId.value = null;
+  if (!id) return;
+  const occurrence = occurrences.value.find((o) => o.id === id);
+  if (!occurrence || occurrence.scheduledDate === day) return;
+
+  try {
+    await tasksApi.rescheduleOccurrence(id, day);
+    toast.success(`Moved to ${dayLabel(day)}`);
+    await load(false);
+  } catch (e) {
+    toast.error(e instanceof ApiError ? e.message : "Couldn't reschedule that task");
+  }
+}
 </script>
 
 <template>
@@ -82,17 +138,37 @@ function thisWeek() {
       </div>
     </header>
 
+    <p class="hidden text-xs text-stone-400 sm:block">Drag a task onto another day to reschedule it.</p>
+
     <SkeletonCards v-if="loading" :count="7" height="h-14" />
     <div v-else class="space-y-5">
-      <div v-for="day in weekDays" :key="day">
-        <h2 class="mb-2 flex items-center gap-2 text-sm font-semibold" :class="day === today ? 'text-emerald-600' : 'text-stone-500'">
+      <div
+        v-for="day in weekDays"
+        :key="day"
+        class="rounded-xl transition-colors"
+        :class="dragOverDay === day ? 'bg-emerald-50 ring-2 ring-emerald-300' : ''"
+        @dragover.prevent="handleDragOver(day)"
+        @dragleave="handleDragLeave(day)"
+        @drop.prevent="handleDrop(day)"
+      >
+        <h2 class="mb-2 flex items-center gap-2 px-1 pt-2 text-sm font-semibold" :class="day === today ? 'text-emerald-600' : 'text-stone-500'">
           {{ dayLabel(day) }}
           <span v-if="day === today" class="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600">today</span>
         </h2>
-        <div v-if="occurrencesForDay(day).length" class="space-y-2">
-          <TaskRow v-for="o in occurrencesForDay(day)" :key="o.id" :occurrence="o" @changed="load" />
+        <div v-if="occurrencesForDay(day).length" class="space-y-2 px-1 pb-2">
+          <div
+            v-for="o in occurrencesForDay(day)"
+            :key="o.id"
+            :draggable="isDraggable(o)"
+            class="transition-opacity"
+            :class="[isDraggable(o) ? 'cursor-grab active:cursor-grabbing' : '', draggingId === o.id ? 'opacity-40' : '']"
+            @dragstart="handleDragStart($event, o)"
+            @dragend="handleDragEnd"
+          >
+            <TaskRow :occurrence="o" @changed="load(false)" />
+          </div>
         </div>
-        <p v-else class="pl-1 text-xs text-stone-300">Nothing scheduled</p>
+        <p v-else class="px-1 pb-2 text-xs text-stone-300">Nothing scheduled</p>
       </div>
     </div>
   </div>
