@@ -67,43 +67,47 @@ frontend/src/
   views/            Today, Dashboard, Goals, GoalDetail, Plans, Calendar, History, Review,
                      Search, Assistant, Login, Signup
   components/       AppShell (nav), TaskRow, ProgressBar, SleepWidget, Icon, ToastHost,
-                     SkeletonCards, EmptyState
-  composables/      useReminderPolling, useToast
+                     SkeletonCards, EmptyState, MarkdownContent, TrendChart
+  composables/      useReminderPolling (web), useNativeAlarms (Capacitor native), useToast
+  lib/              alarmSound.ts (Web Audio synthesized alarm beeps)
   stores/           auth (pinia)
   api/              typed fetch client per backend domain
+  android/, ios/    Capacitor native projects (see "Mobile app" below)
 ```
 
-## What's implemented
+## Recent additions
 
-**Phase 1 — core execution loop**
-- Email/password auth (httpOnly JWT cookie), per-user data isolation.
-- Areas (seeded defaults + custom), Plans, Goals, Targets (nestable milestone/monthly/weekly), Tasks + dated Task Occurrences.
-- Automatic progress rollup: occurrence → target (incl. nested children) → goal, computed from actual completions, never stored.
-- Goal deadline health (on track / at risk / behind).
-- Today view: today's tasks, auto-surfaced carried-over tasks from previous days, live completion %, Now/Up Next.
-- Carry-over via lineage (reschedule creates a new occurrence, preserves history) plus skip/cancel/reopen.
-- Mobile-first responsive UI.
+- **AI responses render as Markdown** (`MarkdownContent.vue`, via `marked` + `DOMPurify`) — the assistant's system prompt asks for bold/lists/headings where they help; user messages stay plain text.
+- **Pomodoro-style focus presets**: the Focus button on any task offers 25 min / 50 min / no-limit. A chosen preset counts down instead of up and auto-stops (with a toast + browser notification) when it hits zero — purely a client-side overlay on the existing open-ended focus session, no schema change.
+- **Drag-to-reschedule on the Calendar**: drag any open task onto a different day to reschedule it (native HTML5 drag-and-drop); goes through the same reschedule-by-lineage endpoint as the "Carry to tomorrow" menu action, so history stays intact.
+- **Deeper analytics trend charts** on the Dashboard: `GET /analytics/trends` returns 8-week and 6-month completion-% buckets (`backend/src/domains/analytics/service.ts`), rendered as single-hue bar charts with a per-bar hover tooltip (`TrendChart.vue`).
+- **Automatic start/end task alarms**: every open task with a start and/or end time now gets a push notification + alarm sound automatically — a start alarm 5 minutes before it begins, an end alarm the moment it ends. Nothing to opt into; replaces the old manual "Remind me" checkbox. On the web this is a foreground poll (`useReminderPolling`, every 15s) with a synthesized Web Audio beep; on the mobile app it's real OS-scheduled notifications (`useNativeAlarms`) that keep firing even while the app is backgrounded. See "Mobile app" below.
 
-**Phase 2 — full daily-use loop**
-- Recurring tasks (daily/weekdays/weekly/monthly/custom), lazily generated on a rolling 14-day window; each occurrence is independent (completing today's never touches tomorrow's).
-- Reminders: created per-occurrence (at start / 5 / 10 / 15 min before), fired via frontend polling (`GET /reminders/due` every 30s) + browser Notification API — no backend job infra.
-- Notes: attach to a task occurrence (quick-capture from the Today list), searchable globally.
-- Sleep tracking: quick-log widget on Today, shows duration vs. target.
-- Daily review: end-of-day stats (completed/incomplete/carried-over/skipped, focus time, sleep, goals worked on) plus the three reflection prompts from the spec, persisted per day.
-- History: browse any date range, see completion % and sleep per day, drill into a day's review.
-- Calendar: weekly agenda view of scheduled tasks.
-- Global search across goals, plans, targets, tasks, notes, and daily reviews.
+**Notable bug fixed while building these**: `TodayView.vue` and `CalendarView.vue` were re-setting `loading = true` on *every* reload — including reloads triggered by a child task's own action (complete/focus/reschedule) — which flips the template's `v-if="loading"` / `v-else-if="view"` branch and unmounts every `TaskRow`, silently discarding any in-flight local state (a running Pomodoro countdown, an open menu). Fixed by only showing the loading skeleton on the true first load (`view.value === null`) or an explicit week change; reloads after a task action now patch the existing list in place instead of tearing it down. Worth keeping in mind for any other view with a similar `v-if="loading"` guard around a list of stateful children.
 
-**Phase 3 — analytics**
-- Focus timer per task (start/stop, persists across reloads), rolled up into a goal's "focused hours" and "days active."
-- Dashboard: this week/month completion, per-goal progress, 7-day sleep average, current + longest streak, all-time totals.
-- Streaks (current + longest, overall and per-goal) — a supporting metric, not the primary measurement.
-- Richer history: per-day goals-worked-on and focus time alongside completion/sleep.
+## Mobile app (iOS / Android)
 
-**Phase 4 — AI assistant**
-- Chat-based planning assistant (Gemini, via its OpenAI-compatible endpoint) that can answer progress questions ("why am I behind on X") using real goal/progress data, and propose — never silently create — tasks or goal-breakdown targets via tool-calling; the user reviews and explicitly confirms each proposal before anything is written.
-- The app works fully without this configured — `GOOGLE_AI_API_KEY` unset just disables the Assistant page with a clear message, per the spec's "AI must never be required" rule.
+The frontend is wrapped as a native app with [Capacitor](https://capacitorjs.com/) — same Vue codebase, no separate app to maintain. `frontend/android/` and `frontend/ios/` are the generated native projects; `frontend/capacitor.config.ts` is the app config (`appId: com.execute.tracker`).
 
-## Not yet built
+**Already done in this repo:**
+- `@capacitor/core`, `@capacitor/cli`, `@capacitor/android`, `@capacitor/ios`, `@capacitor/app`, `@capacitor/local-notifications` installed in `frontend/`.
+- `android/` and `ios/` native projects scaffolded (`npx cap add android` / `ios`) and synced with the current web build.
+- `useNativeAlarms.ts` composable: on a native build it fetches `GET /reminders/upcoming` (next 36h) on launch and whenever the app returns to the foreground, and schedules them as real OS local notifications via `@capacitor/local-notifications` — this is what lets alarms fire even if the app isn't open, which a browser-tab poll can never do. `App.vue` picks this vs. the web polling composable via `Capacitor.isNativePlatform()`.
 
-Focus-timer Pomodoro-style presets, drag-to-reschedule on the calendar, deeper analytics trend charts.
+**What you still need to do locally to produce an installable build** — this dev environment is Windows with no Android SDK/Gradle/Java and no Mac, so neither of these could be completed here:
+
+- **Android (APK/AAB)**: install [Android Studio](https://developer.android.com/studio) (bundles the SDK + Gradle). Then:
+  ```bash
+  cd frontend
+  npm run cap:android   # builds the web app, syncs it, opens android/ in Android Studio
+  ```
+  In Android Studio: `Build → Generate Signed Bundle / APK`, choose APK (for sideloading/testing) or Android App Bundle (for Play Store), create/select a signing keystore, build.
+- **iOS (IPA)**: requires a Mac with Xcode installed. Then:
+  ```bash
+  cd frontend
+  npm run cap:ios   # builds the web app, syncs it, opens ios/ in Xcode
+  ```
+  In Xcode: select a Team under Signing & Capabilities (needs an Apple Developer account for a real device or TestFlight/App Store), then `Product → Archive` to produce an IPA.
+- Whenever frontend source changes and you want the native apps to pick them up, re-run `npm run cap:sync` (or the `cap:android`/`cap:ios` scripts above, which do it for you) before rebuilding in Android Studio/Xcode.
+- Android 13+ and iOS both require the user to grant a notification permission at runtime — `useNativeAlarms` requests it automatically on first launch; if denied, alarms silently won't fire (same as the web Notification API).
+- No custom alarm sound file is bundled yet — notifications use the OS default sound. To use a custom sound, drop a `.wav` into `android/app/src/main/res/raw/` and `ios/App/App/` (added to the Xcode project) and reference it via `sound:` in the `LocalNotifications.schedule()` call in `useNativeAlarms.ts`.

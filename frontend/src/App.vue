@@ -1,14 +1,23 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useRoute } from "vue-router";
+import { Capacitor } from "@capacitor/core";
 import AppShell from "./components/AppShell.vue";
 import ToastHost from "./components/ToastHost.vue";
 import { useReminderPolling } from "./composables/useReminderPolling";
+import { useNativeAlarms } from "./composables/useNativeAlarms";
 
 const route = useRoute();
 const isPublic = computed(() => Boolean(route.meta.public));
 
-useReminderPolling();
+// Native (iOS/Android via Capacitor): alarms are scheduled ahead of time as
+// real OS notifications so they still fire while the app is backgrounded.
+// Web: fall back to foreground polling + a synthesized Web Audio alarm.
+if (Capacitor.isNativePlatform()) {
+  useNativeAlarms();
+} else {
+  useReminderPolling();
+}
 </script>
 
 <template>
