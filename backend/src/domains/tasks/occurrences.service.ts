@@ -2,6 +2,7 @@ import { db } from "../../db/index";
 import type { OccurrenceStatus, TaskOccurrenceRow, TaskPriority } from "../../db/types";
 import { BadRequestError, NotFoundError } from "../../lib/errors";
 import { combineToUtc } from "../../lib/time";
+import { syncRemindersForOccurrence } from "../reminders/service";
 
 const OPEN_STATUSES = ["todo", "in_progress"] as const;
 
@@ -43,6 +44,7 @@ async function setStatus(
     .update({ status, updatedAt: new Date(), ...extra })
     .returning("*");
   if (!row) throw new NotFoundError("Task occurrence not found");
+  await syncRemindersForOccurrence(row);
   return row;
 }
 
@@ -127,6 +129,7 @@ export async function updateOccurrence(
 
   const [row] = await db<TaskOccurrenceRow>("task_occurrences").where({ id: occurrenceId, userId }).update(patch).returning("*");
   if (!row) throw new NotFoundError("Task occurrence not found");
+  await syncRemindersForOccurrence(row);
   return row;
 }
 
@@ -169,6 +172,9 @@ export async function rescheduleOccurrence(userId: string, occurrenceId: string,
       .where({ id: existing.id })
       .update({ status: "rescheduled", rescheduledToId: next.id, updatedAt: new Date() })
       .returning("*");
+
+    await syncRemindersForOccurrence(prev, trx);
+    await syncRemindersForOccurrence(next, trx);
 
     return { previous: prev, next };
   });

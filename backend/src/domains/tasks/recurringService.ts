@@ -4,6 +4,7 @@ import type { RecurrenceType, TaskOccurrenceRow, TaskPriority, TaskRow } from ".
 import { BadRequestError } from "../../lib/errors";
 import { combineToUtc, todayInTimezone } from "../../lib/time";
 import { occurrenceDatesInRange } from "./recurrence";
+import { syncRemindersForOccurrence } from "../reminders/service";
 
 const ROLLING_WINDOW_DAYS = 14;
 // Cap how far forward a single generation pass ever inserts, so a daily
@@ -42,22 +43,28 @@ async function generateOccurrencesForTask(task: TaskRow, timezone: string, fromD
   const startTime = task.defaultStartTime;
   const endTime = task.defaultEndTime;
 
-  await db<TaskOccurrenceRow>("task_occurrences").insert(
-    missingDates.map((scheduledDate) => ({
-      userId: task.userId,
-      taskId: task.id,
-      areaId: task.areaId,
-      goalId: task.goalId,
-      targetId: task.targetId,
-      title: task.title,
-      description: task.description,
-      priority: task.priority,
-      scheduledDate,
-      startAt: combineToUtc(scheduledDate, startTime, timezone),
-      endAt: combineToUtc(scheduledDate, endTime, timezone),
-      durationMinutes: task.defaultDurationMinutes,
-    })),
-  );
+  const inserted = await db<TaskOccurrenceRow>("task_occurrences")
+    .insert(
+      missingDates.map((scheduledDate) => ({
+        userId: task.userId,
+        taskId: task.id,
+        areaId: task.areaId,
+        goalId: task.goalId,
+        targetId: task.targetId,
+        title: task.title,
+        description: task.description,
+        priority: task.priority,
+        scheduledDate,
+        startAt: combineToUtc(scheduledDate, startTime, timezone),
+        endAt: combineToUtc(scheduledDate, endTime, timezone),
+        durationMinutes: task.defaultDurationMinutes,
+      })),
+    )
+    .returning("*");
+
+  for (const occurrence of inserted) {
+    await syncRemindersForOccurrence(occurrence);
+  }
 }
 
 export async function createRecurringTask(userId: string, timezone: string, input: CreateRecurringTaskInput): Promise<TaskRow> {

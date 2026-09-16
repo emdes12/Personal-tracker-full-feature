@@ -4,7 +4,6 @@ import * as todayApi from "../api/today";
 import * as tasksApi from "../api/tasks";
 import * as goalsApi from "../api/goals";
 import * as streaksApi from "../api/streaks";
-import * as remindersApi from "../api/reminders";
 import type { Goal, TodayResponse } from "../types";
 import { todayDateString, formatDateLong, formatTime } from "../lib/date";
 import TaskRow from "../components/TaskRow.vue";
@@ -30,18 +29,24 @@ const newEndTime = ref("");
 const newGoalId = ref("");
 const isRecurring = ref(false);
 const recurrenceType = ref<"daily" | "weekdays" | "weekly" | "monthly">("daily");
-const remindMe = ref(false);
 const adding = ref(false);
 
 async function load() {
-  loading.value = true;
+  // Only show the skeleton on the very first load. Reloads triggered by a
+  // child action (completing a task, starting a focus session, ...) must
+  // NOT flip `loading` back to true — that swaps the template's v-if/
+  // v-else-if branch, which unmounts every TaskRow and discards their local
+  // state (in-flight Pomodoro countdowns, open menus) even though nothing
+  // about the list structure actually needs to change.
+  const isFirstLoad = view.value === null;
+  if (isFirstLoad) loading.value = true;
   try {
     const [t, g, s] = await Promise.all([todayApi.getToday(date), goalsApi.listGoals(), streaksApi.getStreak()]);
     view.value = t;
     goals.value = g.goals.filter((goal) => goal.status === "active");
     streak.value = s.streak;
   } finally {
-    loading.value = false;
+    if (isFirstLoad) loading.value = false;
   }
 }
 
@@ -63,23 +68,19 @@ async function handleAddTask() {
         endTime: newEndTime.value || null,
       });
     } else {
-      const result = await tasksApi.createTask({
+      await tasksApi.createTask({
         title: newTitle.value.trim(),
         scheduledDate: date,
         startTime: newStartTime.value || null,
         endTime: newEndTime.value || null,
         goalId: newGoalId.value || null,
       });
-      if (remindMe.value && newStartTime.value) {
-        await remindersApi.createReminder(result.occurrence.id, "at_start");
-      }
     }
     newTitle.value = "";
     newStartTime.value = "";
     newEndTime.value = "";
     newGoalId.value = "";
     isRecurring.value = false;
-    remindMe.value = false;
     showAddForm.value = false;
     toast.success("Task added");
     await load();
@@ -172,10 +173,9 @@ async function handleAddTask() {
           <option value="weekly">Weekly (same day)</option>
           <option value="monthly">Monthly (same date)</option>
         </select>
-        <label v-if="!isRecurring && newStartTime" class="flex items-center gap-2 text-sm text-stone-600">
-          <input v-model="remindMe" type="checkbox" class="rounded border-stone-300" />
-          Remind me at start time
-        </label>
+        <p v-if="!isRecurring && (newStartTime || newEndTime)" class="text-xs text-stone-500">
+          You'll get an alarm reminder automatically when this task starts and ends.
+        </p>
         <button type="submit" :disabled="adding" class="w-full rounded-lg bg-stone-900 py-2 text-sm font-medium text-white disabled:opacity-50">
           {{ adding ? "Adding…" : "Add task" }}
         </button>

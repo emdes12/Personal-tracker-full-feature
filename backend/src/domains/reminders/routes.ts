@@ -8,6 +8,7 @@ import {
   deleteReminder,
   listDueReminders,
   listRemindersForOccurrence,
+  listUpcomingReminders,
   markReminderSent,
 } from "./service";
 
@@ -26,6 +27,14 @@ remindersRouter.get(
   "/due",
   asyncHandler(async (req, res) => {
     res.json({ reminders: await listDueReminders(req.user!.id) });
+  }),
+);
+
+/** Not-yet-due alarms in the next ~36h — the mobile app schedules these as native local notifications ahead of time instead of relying on a poll. */
+remindersRouter.get(
+  "/upcoming",
+  asyncHandler(async (req, res) => {
+    res.json({ reminders: await listUpcomingReminders(req.user!.id) });
   }),
 );
 

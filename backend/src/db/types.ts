@@ -127,11 +127,13 @@ export interface TaskOccurrenceRow {
 }
 
 export type ReminderOffsetType = "at_start" | "5_min" | "10_min" | "15_min" | "custom";
+export type ReminderKind = "start" | "end";
 
 export interface TaskReminderRow {
   id: string;
   userId: string;
   occurrenceId: string;
+  kind: ReminderKind;
   offsetType: ReminderOffsetType;
   offsetMinutes: number;
   remindAt: Date;

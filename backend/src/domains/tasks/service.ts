@@ -2,6 +2,7 @@ import { db } from "../../db/index";
 import type { TaskOccurrenceRow, TaskPriority, TaskRow } from "../../db/types";
 import { BadRequestError, NotFoundError } from "../../lib/errors";
 import { combineToUtc } from "../../lib/time";
+import { syncRemindersForOccurrence } from "../reminders/service";
 
 export interface CreateTaskInput {
   title: string;
@@ -61,6 +62,8 @@ export async function createOneOffTask(userId: string, timezone: string, input: 
         durationMinutes: input.durationMinutes ?? null,
       })
       .returning("*");
+
+    await syncRemindersForOccurrence(occurrence, trx);
 
     return { task, occurrence };
   });

@@ -1,15 +1,23 @@
 import { api } from "./client";
 
+export type ReminderKind = "start" | "end";
+
 export interface DueReminder {
   id: string;
   occurrenceId: string;
+  kind: ReminderKind;
   remindAt: string;
   title: string;
   startAt: string | null;
+  endAt: string | null;
 }
 
 export function listDueReminders() {
   return api.get<{ reminders: DueReminder[] }>("/reminders/due");
+}
+
+export function listUpcomingReminders() {
+  return api.get<{ reminders: DueReminder[] }>("/reminders/upcoming");
 }
 
 export function markReminderSent(id: string) {
