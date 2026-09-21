@@ -1,4 +1,4 @@
-import { onMounted, onUnmounted } from "vue";
+import { onMounted, onUnmounted, watch } from "vue";
 import { Capacitor } from "@capacitor/core";
 import { LocalNotifications } from "@capacitor/local-notifications";
 import { App as CapacitorApp } from "@capacitor/app";
@@ -64,22 +64,43 @@ async function syncScheduledAlarms() {
   });
 }
 
+const RESYNC_INTERVAL_MS = 30_000;
+
 export function useNativeAlarms() {
   if (!Capacitor.isNativePlatform()) return;
 
   const auth = useAuthStore();
   let resumeHandle: { remove: () => void } | undefined;
+  let timer: ReturnType<typeof setInterval> | undefined;
+  let syncing = false;
+
+  // Tasks are created/edited inside the app at any time, so re-sync on login,
+  // on returning to the foreground, and on a short interval while open —
+  // scheduling once at startup would miss every task added afterwards.
+  async function sync() {
+    if (!auth.user || syncing) return;
+    syncing = true;
+    try {
+      await syncScheduledAlarms();
+    } catch (err) {
+      console.warn("Could not schedule native alarms", err);
+    } finally {
+      syncing = false;
+    }
+  }
+
+  watch(() => auth.user, sync);
 
   onMounted(async () => {
-    if (!auth.user) return;
-    await syncScheduledAlarms();
-    const listener = await CapacitorApp.addListener("appStateChange", ({ isActive }) => {
-      if (isActive && auth.user) syncScheduledAlarms();
+    sync();
+    timer = setInterval(sync, RESYNC_INTERVAL_MS);
+    resumeHandle = await CapacitorApp.addListener("appStateChange", ({ isActive }) => {
+      if (isActive) sync();
     });
-    resumeHandle = listener;
   });
 
   onUnmounted(() => {
+    if (timer) clearInterval(timer);
     resumeHandle?.remove();
   });
 }
