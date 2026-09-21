@@ -5,7 +5,8 @@ import { UnauthorizedError } from "../lib/errors";
 import { asyncHandler } from "../lib/asyncHandler";
 
 export const requireAuth = asyncHandler(async (req: Request, _res: Response, next: NextFunction) => {
-  const token = req.cookies?.[AUTH_COOKIE_NAME];
+  const bearer = req.headers.authorization?.startsWith("Bearer ") ? req.headers.authorization.slice(7) : undefined;
+  const token = req.cookies?.[AUTH_COOKIE_NAME] ?? bearer;
   if (!token) throw new UnauthorizedError("Not authenticated");
 
   let payload;

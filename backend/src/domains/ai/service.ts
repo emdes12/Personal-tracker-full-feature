@@ -153,7 +153,7 @@ export async function chat(userId: string, timezone: string, message: string, hi
   return { reply, proposedTasks, proposedTargets };
 }
 
-function callTools(tools:OpenAI.Chat.Completions.ChatCompletionToolCall[]): { proposedTasks: ProposedTask[]; proposedTargets: ChatResult["proposedTargets"] } {
+function callTools(tools:OpenAI.Chat.Completions.ChatCompletionMessageToolCall[]): { proposedTasks: ProposedTask[]; proposedTargets: ChatResult["proposedTargets"] } {
   
   const proposedTasks: ProposedTask[] = [];
   let proposedTargets: ChatResult["proposedTargets"] = null;

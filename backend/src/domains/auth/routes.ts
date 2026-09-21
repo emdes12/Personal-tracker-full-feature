@@ -36,7 +36,7 @@ authRouter.post(
     const user = await signup(req.body);
     const token = signAuthToken(user.id);
     res.cookie(AUTH_COOKIE_NAME, token, cookieOptions);
-    res.status(201).json({ user });
+    res.status(201).json({ user, token });
   }),
 );
 
@@ -47,7 +47,7 @@ authRouter.post(
     const user = await login(req.body);
     const token = signAuthToken(user.id);
     res.cookie(AUTH_COOKIE_NAME, token, cookieOptions);
-    res.json({ user });
+    res.json({ user, token });
   }),
 );
 

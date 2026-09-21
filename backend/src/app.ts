@@ -20,7 +20,7 @@ import { analyticsRouter } from "./domains/analytics/routes";
 import { aiRouter } from "./domains/ai/routes";
 import { errorHandler } from "./middleware/errorHandler";
 
-const corsOrigins = (process.env.CORS_ORIGIN ?? "http://localhost:5173").split(",").map((s) => s.trim());
+const corsOrigins = (process.env.CORS_ORIGIN ?? "http://localhost:5173,http://localhost,capacitor://localhost").split(",").map((s) => s.trim());
 
 export function createApp() {
   const app = express();
